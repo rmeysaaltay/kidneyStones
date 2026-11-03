@@ -1,0 +1,73 @@
+import gradio as gr
+from ultralytics import YOLO
+
+MODEL_PATH = r"C:\Users\msi-nb\Downloads\kidneybest.pt"
+CONF_THRESHOLD = 0.45  # Sabit eşik değeri
+
+model = YOLO(MODEL_PATH)
+
+TR_NAMES = {
+    "cysts": "Kist",
+    "normal": "Normal Doku",
+    "stones": "Böbrek Taşı",
+    "tumors": "Tümör",
+}
+
+
+def analyze(image):
+    if image is None:
+        return None, "### ⚠️ Lütfen analiz için bir görüntü yükleyin."
+
+    bgr = image[..., ::-1]
+    result = model.predict(bgr, conf=CONF_THRESHOLD, imgsz=640, verbose=False)[0]
+
+    annotated = result.plot()[..., ::-1]
+
+    # Sadece tespit edilen bulguları topla
+    detections = []
+    for box in result.boxes:
+        name = model.names[int(box.cls[0])]
+        score = float(box.conf[0])
+        tr_label = TR_NAMES.get(name, name)
+        detections.append((tr_label, score))
+
+    # Skora göre büyükten küçüğe sırala
+    detections.sort(key=lambda x: x[1], reverse=True)
+
+    # Rapor metnini Markdown ile hazırla
+    lines = ["### 📋 Analiz Raporu\n"]
+
+    if detections:
+        lines.append(f"**Tespit Edilen Bulgu Sayısı:** {len(detections)}\n")
+        lines.append("| Bulgu Türü | Tespit Güveni |")
+        lines.append("| :--- | :--- |")
+        for label, score in detections:
+            lines.append(f"| **{label}** | %{score * 100:.1f} |")
+    else:
+        lines.append("✅ **Belirgin bir anormallik veya bulgu tespit edilmedi.**")
+
+    lines.append("ℹ️ *Bu sonuç yapay zekâ destekli bir ön analizdir; kesin tanı yerine geçmez.*")
+
+    return annotated, "\n".join(lines)
+
+
+with gr.Blocks(
+    theme=gr.themes.Base(primary_hue="indigo", neutral_hue="slate"),
+    title="Böbrek Analiz Sistemi",
+    js="() => { document.body.classList.add('dark'); }",
+) as demo:
+    gr.Markdown("# 🩺 Böbrek Görüntü Analiz Sistemi")
+
+    with gr.Row():
+        with gr.Column():
+            input_img = gr.Image(label="Medikal Görüntü Yükleyin", type="numpy", height=450)
+            run_btn = gr.Button("🔍 Görüntüyü Analiz Et", variant="primary", size="lg")
+
+        with gr.Column():
+            output_img = gr.Image(label="İşaretlenmiş Görüntü", height=450)
+            output_report = gr.Markdown("Sonuçları görmek için bir görüntü yükleyip analiz edin.")
+
+    run_btn.click(analyze, inputs=[input_img], outputs=[output_img, output_report])
+
+if __name__ == "__main__":
+    demo.launch(inbrowser=True)
